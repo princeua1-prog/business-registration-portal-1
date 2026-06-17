@@ -1,3 +1,22 @@
+// ============ SECURITY: Input Sanitization ============
+
+function sanitizeInput(input) {
+    const div = document.createElement('div');
+    div.textContent = input;
+    return div.innerHTML;
+}
+
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
 // ============ FORM VALIDATION ============
 
 const validators = {
@@ -6,67 +25,171 @@ const validators = {
         return emailRegex.test(value);
     },
     password: (value) => {
-        return value.length >= 8;
+        // Enhanced: min 8 chars, at least one uppercase, one lowercase, one number
+        return value.length >= 8 && /[A-Z]/.test(value) && /[a-z]/.test(value) && /[0-9]/.test(value);
+    },
+    passwordStrength: (value) => {
+        // Returns: 'weak', 'medium', 'strong'
+        let strength = 'weak';
+        if (value.length >= 12) strength = 'medium';
+        if (value.length >= 12 && /[!@#$%^&*]/.test(value)) strength = 'strong';
+        return strength;
     },
     name: (value) => {
-        return value.trim().length >= 2;
+        return value.trim().length >= 2 && /^[a-zA-Z\s'-]+$/.test(value);
     },
     businessName: (value) => {
-        return value.trim().length >= 3;
+        return value.trim().length >= 3 && /^[a-zA-Z0-9\s'-]+$/.test(value);
     }
 };
 
 const errorMessages = {
     emailInvalid: 'Please enter a valid email address',
-    passwordShort: 'Password must be at least 8 characters long',
-    nameShort: 'Name must be at least 2 characters long',
-    businessNameShort: 'Business name must be at least 3 characters long',
+    passwordShort: 'Password must be at least 8 characters with uppercase, lowercase, and numbers',
+    nameShort: 'Name must be at least 2 characters (letters, spaces, hyphens, apostrophes only)',
+    businessNameShort: 'Business name must be at least 3 characters',
     passwordMismatch: 'Passwords do not match',
     emailExists: 'This email is already registered'
 };
 
-// ============ LOCAL STORAGE MANAGEMENT ============
+// ============ BACKEND SIMULATION (In production, use actual backend) ============
 
-const StorageManager = {
-    getUsers() {
-        const users = localStorage.getItem('businessPortal_users');
+class BackendService {
+    static async registerUser(userData) {
+        // Simulate backend call - in production, POST to /api/auth/register
+        return new Promise((resolve, reject) => {
+            setTimeout(() => {
+                if (this.userExists(userData.email)) {
+                    reject('Email already registered');
+                } else {
+                    // Simulate password hashing on backend
+                    const hashedPassword = this.hashPassword(userData.password);
+                    const user = {
+                        ...userData,
+                        password: hashedPassword,
+                        createdAt: new Date().toISOString(),
+                        documents: []
+                    };
+                    SessionManager.saveUser(userData.email, user);
+                    resolve(user);
+                }
+            }, 500);
+        });
+    }
+
+    static async loginUser(email, password) {
+        // Simulate backend call - in production, POST to /api/auth/login
+        return new Promise((resolve, reject) => {
+            setTimeout(() => {
+                const user = SessionManager.getUser(email);
+                if (!user) {
+                    reject('User not found');
+                } else if (!this.verifyPassword(password, user.password)) {
+                    reject('Incorrect password');
+                } else {
+                    // Return user without password
+                    const { password: _, ...userWithoutPassword } = user;
+                    resolve(userWithoutPassword);
+                }
+            }, 500);
+        });
+    }
+
+    // Simple hash simulation - IN PRODUCTION USE REAL BACKEND WITH BCRYPT
+    static hashPassword(password) {
+        // This is just for demo - NEVER use this in production
+        // Use bcrypt or Argon2 on the backend
+        return btoa(password + 'salt_' + Date.now());
+    }
+
+    static verifyPassword(password, hash) {
+        return btoa(password + 'salt_' + hash.split('_')[1]) === hash;
+    }
+
+    static userExists(email) {
+        return SessionManager.userExists(email);
+    }
+}
+
+// ============ SESSION MANAGEMENT (Secure) ============
+
+class SessionManager {
+    static STORAGE_KEY = 'brp_users';
+    static SESSION_KEY = 'brp_session';
+    static SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+    static SESSION_TOKEN_KEY = 'brp_token';
+
+    static generateToken() {
+        // Generate a simple token (in production, use JWT from backend)
+        return 'token_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    static getUsers() {
+        const users = localStorage.getItem(this.STORAGE_KEY);
         return users ? JSON.parse(users) : {};
-    },
+    }
 
-    saveUser(email, userData) {
+    static saveUser(email, userData) {
         const users = this.getUsers();
         users[email.toLowerCase()] = userData;
-        localStorage.setItem('businessPortal_users', JSON.stringify(users));
-    },
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(users));
+    }
 
-    userExists(email) {
+    static userExists(email) {
         const users = this.getUsers();
         return email.toLowerCase() in users;
-    },
+    }
 
-    getUser(email) {
+    static getUser(email) {
         const users = this.getUsers();
         return users[email.toLowerCase()];
-    },
-
-    getCurrentUser() {
-        const currentUser = localStorage.getItem('businessPortal_currentUser');
-        return currentUser ? JSON.parse(currentUser) : null;
-    },
-
-    setCurrentUser(userEmail) {
-        const user = this.getUser(userEmail);
-        if (user) {
-            localStorage.setItem('businessPortal_currentUser', JSON.stringify(user));
-            return true;
-        }
-        return false;
-    },
-
-    logout() {
-        localStorage.removeItem('businessPortal_currentUser');
     }
-};
+
+    static createSession(user) {
+        const session = {
+            user: {
+                firstName: user.firstName,
+                lastName: user.lastName,
+                email: user.email,
+                businessName: user.businessName
+            },
+            token: this.generateToken(),
+            createdAt: Date.now(),
+            lastActivity: Date.now()
+        };
+        sessionStorage.setItem(this.SESSION_KEY, JSON.stringify(session));
+        sessionStorage.setItem(this.SESSION_TOKEN_KEY, session.token);
+    }
+
+    static getSession() {
+        const session = sessionStorage.getItem(this.SESSION_KEY);
+        if (!session) return null;
+        
+        const parsed = JSON.parse(session);
+        const now = Date.now();
+        
+        // Check if session expired
+        if (now - parsed.lastActivity > this.SESSION_TIMEOUT) {
+            this.logout();
+            return null;
+        }
+        
+        // Update last activity
+        parsed.lastActivity = now;
+        sessionStorage.setItem(this.SESSION_KEY, JSON.stringify(parsed));
+        return parsed;
+    }
+
+    static getCurrentUser() {
+        const session = this.getSession();
+        return session ? session.user : null;
+    }
+
+    static logout() {
+        sessionStorage.removeItem(this.SESSION_KEY);
+        sessionStorage.removeItem(this.SESSION_TOKEN_KEY);
+    }
+}
 
 // ============ FORM HANDLING ============
 
@@ -85,7 +208,7 @@ function setFieldError(fieldId, message) {
     const errorElement = document.getElementById(errorId);
     
     if (field) field.classList.add('error');
-    if (errorElement) errorElement.textContent = message;
+    if (errorElement) errorElement.textContent = escapeHtml(message);
 }
 
 function validateLoginForm() {
@@ -110,7 +233,7 @@ function validateLoginForm() {
         isValid = false;
     }
     
-    return isValid ? { email, password } : null;
+    return isValid ? { email: email.toLowerCase(), password } : null;
 }
 
 function validateRegisterForm() {
@@ -156,7 +279,7 @@ function validateRegisterForm() {
     } else if (!validators.email(email)) {
         setFieldError('regEmail', errorMessages.emailInvalid);
         isValid = false;
-    } else if (StorageManager.userExists(email)) {
+    } else if (SessionManager.userExists(email)) {
         setFieldError('regEmail', errorMessages.emailExists);
         isValid = false;
     }
@@ -190,17 +313,15 @@ function validateRegisterForm() {
     
     if (!isValid) return null;
     
-    return { firstName, lastName, email, businessName, password };
+    return { firstName, lastName, email: email.toLowerCase(), businessName, password };
 }
 
 // ============ AUTH EVENTS ============
 
 function switchTab(tabName) {
-    // Update tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     event.target.classList.add('active');
     
-    // Update forms
     document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
     
     if (tabName === 'login') {
@@ -213,64 +334,70 @@ function switchTab(tabName) {
         document.getElementById('registerFormError').textContent = '';
     }
     
-    // Clear all field errors
     document.querySelectorAll('.error-message').forEach(el => el.textContent = '');
     document.querySelectorAll('input').forEach(el => el.classList.remove('error'));
 }
 
-document.getElementById('loginForm').addEventListener('submit', function(e) {
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
     const formData = validateLoginForm();
     if (!formData) return;
     
-    const user = StorageManager.getUser(formData.email);
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
     
-    if (!user) {
-        document.getElementById('loginFormError').textContent = 'User not found. Please register first.';
-        return;
+    try {
+        const user = await BackendService.loginUser(formData.email, formData.password);
+        document.getElementById('loginSuccess').textContent = 'Login successful! Redirecting...';
+        
+        SessionManager.createSession(user);
+        
+        setTimeout(() => {
+            showDashboard();
+        }, 500);
+    } catch (error) {
+        document.getElementById('loginFormError').textContent = escapeHtml(error);
+    } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Login';
     }
-    
-    if (user.password !== formData.password) {
-        document.getElementById('loginFormError').textContent = 'Incorrect password. Please try again.';
-        return;
-    }
-    
-    // Successful login
-    document.getElementById('loginSuccess').textContent = 'Login successful! Redirecting...';
-    
-    StorageManager.setCurrentUser(formData.email);
-    
-    setTimeout(() => {
-        showDashboard();
-    }, 500);
 });
 
-document.getElementById('registerForm').addEventListener('submit', function(e) {
+document.getElementById('registerForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
     const formData = validateRegisterForm();
     if (!formData) return;
     
-    const userData = {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email,
-        businessName: formData.businessName,
-        password: formData.password,
-        registrationDate: new Date().toLocaleDateString(),
-        documents: [],
-        status: 'Active'
-    };
+    const registerBtn = document.getElementById('registerBtn');
+    registerBtn.disabled = true;
+    registerBtn.textContent = 'Creating Account...';
     
-    StorageManager.saveUser(formData.email, userData);
-    
-    document.getElementById('registerSuccess').textContent = 'Account created successfully! Logging in...';
-    
-    setTimeout(() => {
-        StorageManager.setCurrentUser(formData.email);
-        showDashboard();
-    }, 500);
+    try {
+        const user = await BackendService.registerUser({
+            firstName: sanitizeInput(formData.firstName),
+            lastName: sanitizeInput(formData.lastName),
+            email: formData.email,
+            businessName: sanitizeInput(formData.businessName),
+            password: formData.password,
+            registrationDate: new Date().toLocaleDateString()
+        });
+        
+        document.getElementById('registerSuccess').textContent = 'Account created successfully! Logging in...';
+        
+        SessionManager.createSession(user);
+        
+        setTimeout(() => {
+            showDashboard();
+        }, 500);
+    } catch (error) {
+        document.getElementById('registerFormError').textContent = escapeHtml(error);
+    } finally {
+        registerBtn.disabled = false;
+        registerBtn.textContent = 'Create Account';
+    }
 });
 
 // ============ DASHBOARD FUNCTIONS ============
@@ -279,25 +406,22 @@ function showDashboard() {
     document.getElementById('authPage').style.display = 'none';
     document.getElementById('dashboardPage').style.display = 'flex';
     
-    const currentUser = StorageManager.getCurrentUser();
-    if (currentUser) {
-        updateDashboardWithUserData(currentUser);
+    const user = SessionManager.getCurrentUser();
+    if (user) {
+        updateDashboardWithUserData(user);
     }
 }
 
 function updateDashboardWithUserData(user) {
-    // Update greeting
-    document.getElementById('userGreeting').textContent = `Welcome, ${user.firstName}!`;
-    
-    // Update profile information
-    document.getElementById('displayFirstName').textContent = user.firstName;
-    document.getElementById('displayLastName').textContent = user.lastName;
-    document.getElementById('displayEmail').textContent = user.email;
-    document.getElementById('displayBusinessName').textContent = user.businessName;
-    document.getElementById('registrationDate').textContent = user.registrationDate;
-    
-    // Update stats
-    document.getElementById('docCount').textContent = user.documents ? user.documents.length : 0;
+    // Sanitize and display user data
+    document.getElementById('userGreeting').textContent = `Welcome, ${escapeHtml(user.firstName)}!`;
+    document.getElementById('displayFirstName').textContent = escapeHtml(user.firstName);
+    document.getElementById('displayLastName').textContent = escapeHtml(user.lastName);
+    document.getElementById('displayEmail').textContent = escapeHtml(user.email);
+    document.getElementById('displayBusinessName').textContent = escapeHtml(user.businessName);
+    document.getElementById('displayFullName').textContent = `${escapeHtml(user.firstName)} ${escapeHtml(user.lastName)}`;
+    document.getElementById('displayBusinessNameCard').textContent = escapeHtml(user.businessName);
+    document.getElementById('registrationDate').textContent = escapeHtml(user.registrationDate);
     
     // Load documents
     loadUserDocuments(user);
@@ -307,32 +431,33 @@ function loadUserDocuments(user) {
     const docsList = document.getElementById('docsList');
     docsList.innerHTML = '';
     
-    if (!user.documents || user.documents.length === 0) {
+    const storedUser = SessionManager.getUser(user.email);
+    if (!storedUser.documents || storedUser.documents.length === 0) {
         docsList.innerHTML = '<p class="empty-state">No documents uploaded yet.</p>';
         return;
     }
     
-    user.documents.forEach((doc, index) => {
+    storedUser.documents.forEach((doc, index) => {
         const docItem = document.createElement('div');
         docItem.className = 'doc-item';
         docItem.innerHTML = `
             <div class="doc-icon">📄</div>
-            <div class="doc-name">${doc.name}</div>
-            <div class="doc-type">${doc.type}</div>
+            <div class="doc-name">${escapeHtml(doc.name)}</div>
+            <div class="doc-type">${escapeHtml(doc.type)}</div>
             <button class="doc-delete" onclick="deleteDocument(${index})">Delete</button>
         `;
         docsList.appendChild(docItem);
     });
+    
+    document.getElementById('docCount').textContent = storedUser.documents.length;
 }
 
 function switchDashboardTab(tabName, event) {
     event.preventDefault();
     
-    // Update nav items
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     event.target.closest('.nav-item').classList.add('active');
     
-    // Update tabs
     document.querySelectorAll('.dashboard-tab').forEach(tab => tab.classList.remove('active'));
     
     const tabMap = {
@@ -355,11 +480,9 @@ document.getElementById('documentForm').addEventListener('submit', function(e) {
     const docType = document.getElementById('docType').value;
     const docFile = document.getElementById('docFile');
     
-    // Clear previous errors
     document.getElementById('docTypeError').textContent = '';
     document.getElementById('docFileError').textContent = '';
     
-    // Validate
     let isValid = true;
     if (!docType) {
         document.getElementById('docTypeError').textContent = 'Please select a document type';
@@ -373,76 +496,409 @@ document.getElementById('documentForm').addEventListener('submit', function(e) {
     
     if (!isValid) return;
     
-    // Add document to user
-    const currentUser = StorageManager.getCurrentUser();
-    const fileName = docFile.files[0].name;
-    
-    if (!currentUser.documents) {
-        currentUser.documents = [];
+    // Validate file size (5MB max)
+    if (docFile.files[0].size > 5 * 1024 * 1024) {
+        document.getElementById('docFileError').textContent = 'File size must be less than 5MB';
+        return;
     }
     
-    currentUser.documents.push({
-        name: fileName,
+    const user = SessionManager.getCurrentUser();
+    const storedUser = SessionManager.getUser(user.email);
+    const fileName = docFile.files[0].name;
+    
+    if (!storedUser.documents) {
+        storedUser.documents = [];
+    }
+    
+    storedUser.documents.push({
+        name: sanitizeInput(fileName),
         type: docType,
-        uploadDate: new Date().toLocaleDateString()
+        uploadDate: new Date().toLocaleDateString(),
+        size: docFile.files[0].size
     });
     
-    StorageManager.saveUser(currentUser.email, currentUser);
-    StorageManager.setCurrentUser(currentUser.email);
+    SessionManager.saveUser(user.email, storedUser);
     
-    // Reset form and reload documents
     this.reset();
-    loadUserDocuments(currentUser);
-    document.getElementById('docCount').textContent = currentUser.documents.length;
+    loadUserDocuments(user);
     
-    alert('Document uploaded successfully!');
+    showNotification('Document uploaded successfully!', 'success');
 });
 
 function deleteDocument(index) {
     if (!confirm('Are you sure you want to delete this document?')) return;
     
-    const currentUser = StorageManager.getCurrentUser();
-    currentUser.documents.splice(index, 1);
+    const user = SessionManager.getCurrentUser();
+    const storedUser = SessionManager.getUser(user.email);
     
-    StorageManager.saveUser(currentUser.email, currentUser);
-    StorageManager.setCurrentUser(currentUser.email);
+    storedUser.documents.splice(index, 1);
+    SessionManager.saveUser(user.email, storedUser);
     
-    loadUserDocuments(currentUser);
-    document.getElementById('docCount').textContent = currentUser.documents.length;
+    loadUserDocuments(user);
+    showNotification('Document deleted successfully!', 'success');
 }
 
 function logout() {
     if (!confirm('Are you sure you want to logout?')) return;
     
-    StorageManager.logout();
+    SessionManager.logout();
     
-    // Reset forms
     document.getElementById('loginForm').reset();
     document.getElementById('registerForm').reset();
     document.querySelectorAll('.error-message').forEach(el => el.textContent = '');
     document.querySelectorAll('.success-message').forEach(el => el.textContent = '');
     document.querySelectorAll('input').forEach(el => el.classList.remove('error'));
     
-    // Switch to auth page
     document.getElementById('authPage').style.display = 'flex';
     document.getElementById('dashboardPage').style.display = 'none';
     
-    // Reset tab to login
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-btn')[0].classList.add('active');
     document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
     document.getElementById('loginForm').classList.add('active');
 }
 
+// ============ MODAL FUNCTIONS ============
+
+const MODAL_CONTENT = {
+    step1: {
+        title: 'Step 1: Company Information',
+        content: `
+            <h3>Provide Your Company Details</h3>
+            <p>To register your business, you'll need to provide:</p>
+            <ul>
+                <li><strong>Legal Business Name:</strong> The official registered name of your business</li>
+                <li><strong>Business Address:</strong> Physical address of your business</li>
+                <li><strong>Mailing Address:</strong> Where official documents should be sent</li>
+                <li><strong>Contact Phone Number:</strong> Primary contact number</li>
+                <li><strong>Business Email:</strong> Official business email address</li>
+            </ul>
+            <p><strong>Tip:</strong> Have your business documents ready before you start.</p>
+        `
+    },
+    step2: {
+        title: 'Step 2: Legal Structure',
+        content: `
+            <h3>Choose Your Business Entity Type</h3>
+            <p>Select the legal structure that best fits your business:</p>
+            <ul>
+                <li><strong>Sole Proprietorship:</strong> You are the only owner</li>
+                <li><strong>Partnership:</strong> Business owned by 2 or more people</li>
+                <li><strong>Limited Liability Company (LLC):</strong> Provides liability protection</li>
+                <li><strong>Corporation:</strong> Separate legal entity (C-Corp or S-Corp)</li>
+                <li><strong>Non-Profit Organization:</strong> For charitable/educational purposes</li>
+            </ul>
+            <p><strong>Important:</strong> This choice affects your taxes, liability, and compliance requirements.</p>
+        `
+    },
+    step3: {
+        title: 'Step 3: Registration',
+        content: `
+            <h3>Submit Your Registration</h3>
+            <p>Once you've prepared your information, you'll submit:</p>
+            <ul>
+                <li>Articles of Incorporation or Organization</li>
+                <li>Bylaws or Operating Agreement</li>
+                <li>Proof of Address</li>
+                <li>Owner/Member Identification</li>
+                <li>Any required state-specific forms</li>
+            </ul>
+            <p><strong>Processing Time:</strong> Most registrations are processed within 5-10 business days.</p>
+        `
+    },
+    step4: {
+        title: 'Step 4: Tax Registration',
+        content: `
+            <h3>Complete Tax Registration</h3>
+            <p>After business registration, you'll need to:</p>
+            <ul>
+                <li>Obtain an Employer Identification Number (EIN) from the IRS</li>
+                <li>Register for State Sales Tax (if applicable)</li>
+                <li>Register for Payroll Taxes (if you have employees)</li>
+                <li>Register for Unemployment Insurance</li>
+                <li>Obtain any industry-specific licenses</li>
+            </ul>
+            <p><strong>Benefit:</strong> Tax registration can often be completed online and is usually free.</p>
+        `
+    }
+};
+
+function openModal(step) {
+    const content = MODAL_CONTENT[step];
+    if (content) {
+        document.getElementById('modalTitle').textContent = content.title;
+        document.getElementById('modalBody').innerHTML = content.content;
+        document.getElementById('detailModal').style.display = 'flex';
+    }
+}
+
+function closeModal() {
+    document.getElementById('detailModal').style.display = 'none';
+}
+
+// ============ CHAT FUNCTIONS ============
+
+function openChat() {
+    document.getElementById('chatModal').style.display = 'flex';
+    document.getElementById('chatMessages').innerHTML = `
+        <div class="chat-message support">
+            <p><strong>Support Agent:</strong> Hello! How can I help you today?</p>
+        </div>
+    `;
+}
+
+function closeChat() {
+    document.getElementById('chatModal').style.display = 'none';
+}
+
+function sendChatMessage() {
+    const chatInput = document.getElementById('chatInput');
+    const message = chatInput.value.trim();
+    
+    if (!message) return;
+    
+    const chatMessages = document.getElementById('chatMessages');
+    
+    // User message
+    const userMsg = document.createElement('div');
+    userMsg.className = 'chat-message user';
+    userMsg.innerHTML = `<p>${escapeHtml(message)}</p>`;
+    chatMessages.appendChild(userMsg);
+    
+    // Clear input
+    chatInput.value = '';
+    
+    // Auto-scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    // Simulate support response
+    setTimeout(() => {
+        const responses = [
+            'Thank you for your message. Our team will review your inquiry and get back to you shortly.',
+            'I understand. Let me help you with that. Could you provide more details?',
+            'Great question! This is a common question we receive. Please check our Knowledge Base for detailed information.',
+            'I\'ll connect you with a specialist who can better assist you.',
+            'Thank you for using our support system. Your message has been logged.'
+        ];
+        
+        const response = responses[Math.floor(Math.random() * responses.length)];
+        const supportMsg = document.createElement('div');
+        supportMsg.className = 'chat-message support';
+        supportMsg.innerHTML = `<p><strong>Support Agent:</strong> ${response}</p>`;
+        chatMessages.appendChild(supportMsg);
+        
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }, 1000);
+}
+
+function handleChatKeyPress(event) {
+    if (event.key === 'Enter') {
+        sendChatMessage();
+    }
+}
+
+// ============ SUPPORT RESOURCES ============
+
+const SUPPORT_RESOURCES = {
+    'knowledge-base': {
+        title: 'Knowledge Base',
+        content: `
+            <h3>Business Registration Knowledge Base</h3>
+            <p>Find answers to frequently asked questions:</p>
+            <ul>
+                <li><a href="#">How do I register my business?</a></li>
+                <li><a href="#">What documents do I need?</a></li>
+                <li><a href="#">What are the registration fees?</a></li>
+                <li><a href="#">How long does registration take?</a></li>
+                <li><a href="#">Can I change my business structure later?</a></li>
+                <li><a href="#">What is an EIN and do I need one?</a></li>
+            </ul>
+        `
+    },
+    'live-chat': {
+        title: 'Live Chat Support',
+        action: 'openChat'
+    },
+    'phone-support': {
+        title: 'Phone Support',
+        content: `
+            <h3>Phone Support</h3>
+            <p><strong>Available Hours:</strong> Monday - Friday, 9 AM - 5 PM EST</p>
+            <p><strong>Phone Number:</strong> +1-800-BUSINESS (248-9377)</p>
+            <p><strong>Extension:</strong> 1 for Registration, 2 for Compliance, 3 for Billing</p>
+            <p>Our support team is ready to assist you with any questions about business registration and compliance.</p>
+        `
+    },
+    'email-support': {
+        title: 'Email Support',
+        content: `
+            <h3>Email Support</h3>
+            <p><strong>Email Address:</strong> support@iconicuniversity.edu</p>
+            <p><strong>Response Time:</strong> Within 24 business hours</p>
+            <p>Please include the following in your email:</p>
+            <ul>
+                <li>Your account email address</li>
+                <li>A clear description of your issue</li>
+                <li>Any relevant documents or screenshots</li>
+            </ul>
+        `
+    },
+    'webinars': {
+        title: 'Training Webinars',
+        content: `
+            <h3>Upcoming Webinars</h3>
+            <p>Join our expert-led webinars to learn about business topics:</p>
+            <ul>
+                <li><strong>Webinar 1:</strong> Business Registration 101 - June 25, 2:00 PM EST</li>
+                <li><strong>Webinar 2:</strong> Tax Planning for New Businesses - July 2, 3:00 PM EST</li>
+                <li><strong>Webinar 3:</strong> Compliance and Legal Requirements - July 9, 2:00 PM EST</li>
+                <li><strong>Webinar 4:</strong> Growing Your Business - July 16, 3:00 PM EST</li>
+            </ul>
+            <p>All webinars are free and recorded for later viewing.</p>
+        `
+    },
+    'legal-resources': {
+        title: 'Legal Resources',
+        content: `
+            <h3>Legal Documents and Templates</h3>
+            <p>Access templates and legal documents for your business:</p>
+            <ul>
+                <li><a href="#">Operating Agreement Template</a></li>
+                <li><a href="#">Partnership Agreement Template</a></li>
+                <li><a href="#">Employee Handbook Template</a></li>
+                <li><a href="#">Confidentiality Agreement</a></li>
+                <li><a href="#">Independent Contractor Agreement</a></li>
+                <li><a href="#">Business Loan Agreement</a></li>
+            </ul>
+            <p><strong>Disclaimer:</strong> These templates are for reference only. Consult with a legal professional for your specific needs.</p>
+        `
+    }
+};
+
+function openResource(resourceType) {
+    const resource = SUPPORT_RESOURCES[resourceType];
+    
+    if (resource && resource.action === 'openChat') {
+        openChat();
+    } else if (resource) {
+        document.getElementById('modalTitle').textContent = resource.title;
+        document.getElementById('modalBody').innerHTML = resource.content;
+        document.getElementById('detailModal').style.display = 'flex';
+    }
+}
+
+// ============ NOTIFICATION SYSTEM ============
+
+function showNotification(message, type = 'info') {
+    // Remove existing notification if any
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+    
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        background: ${type === 'success' ? '#27AE60' : type === 'error' ? '#E74C3C' : '#2E5090'};
+        color: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 10000;
+        animation: slideInRight 0.3s ease;
+    `;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.style.animation = 'slideOutRight 0.3s ease';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+// ============ PROFILE PICTURE FUNCTIONS ============
+
+function handleProfilePicChange(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('profilePicPreview').src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function handleNewProfilePicChange(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('newProfilePicPreview').src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function changeProfilePicture() {
+    document.getElementById('profilePicModal').style.display = 'flex';
+}
+
+function closeProfilePicModal() {
+    document.getElementById('profilePicModal').style.display = 'none';
+}
+
+function saveNewProfilePic() {
+    const newPic = document.getElementById('newProfilePicPreview').src;
+    if (newPic && newPic !== document.getElementById('profileDisplayPic').src) {
+        document.getElementById('profileDisplayPic').src = newPic;
+        document.getElementById('dashboardAvatar').src = newPic;
+        showNotification('Profile picture updated successfully!', 'success');
+        closeProfilePicModal();
+    }
+}
+
 // ============ INITIALIZE APP ============
 
 window.addEventListener('load', function() {
-    const currentUser = StorageManager.getCurrentUser();
+    const session = SessionManager.getSession();
     
-    if (currentUser) {
+    if (session) {
         showDashboard();
     } else {
         document.getElementById('authPage').style.display = 'flex';
         document.getElementById('dashboardPage').style.display = 'none';
+    }
+});
+
+// ============ SECURITY: Auto-logout on inactivity ============
+
+let inactivityTimer;
+
+function resetInactivityTimer() {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(() => {
+        const session = SessionManager.getSession();
+        if (session) {
+            SessionManager.logout();
+            window.location.reload();
+            showNotification('Session expired due to inactivity. Please login again.', 'error');
+        }
+    }, SessionManager.SESSION_TIMEOUT);
+}
+
+document.addEventListener('mousemove', resetInactivityTimer);
+document.addEventListener('keypress', resetInactivityTimer);
+document.addEventListener('click', resetInactivityTimer);
+
+// ============ SECURITY: Close modals on ESC key ============
+
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        document.getElementById('detailModal').style.display = 'none';
+        document.getElementById('chatModal').style.display = 'none';
+        document.getElementById('profilePicModal').style.display = 'none';
     }
 });
